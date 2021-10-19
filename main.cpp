@@ -60,6 +60,7 @@ GLuint indexBuffer = 0;
 GLuint uTime = 0;
 GLuint uTimeDelta = 0;
 float lastUpdate = 0;
+bool firstRender = true;
 std::vector<glm::vec3> points = {
 	{ 0, 0, 0 },
 	{ 0.1, 0, 0 },
@@ -189,8 +190,6 @@ GLFWwindow* setup() {
 	return window;
 }
 
-bool first[] = { true, true };
-
 void render(GLFWwindow* window) {
 	auto otherBuffer = (activeBuffer + 1) & 0x1;
 	auto now = glfwGetTime();
@@ -205,9 +204,9 @@ void render(GLFWwindow* window) {
 	glBindTransformFeedback(GL_TRANSFORM_FEEDBACK, transformFeedback[otherBuffer]);
 
 	glBeginTransformFeedback(GL_POINTS);
-	if(first[0]) {
+	if(firstRender) {
 		glDrawElements(GL_POINTS, points.size(), GL_UNSIGNED_INT, 0);
-		first[0] = false;
+		firstRender = false;
 	} else {
 		glDrawTransformFeedback(GL_POINTS, transformFeedback[activeBuffer]);
 	}
