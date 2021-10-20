@@ -23,9 +23,11 @@ const char* vert =
 "layout(location=0) in vec3 inPos;\n"
 "layout(location=1) in vec3 inDir;\n"
 "layout(location=2) in float inLife;\n"
+"layout(location=3) in float inSize;\n"
 "layout(location=0) out vec3 outPos;\n"
 "layout(location=1) out vec3 outDir;\n"
 "layout(location=2) out float outLife;\n"
+"layout(location=3) out float outSize;\n"
 "float rand(vec2 co){\n"
 "return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453);\n"
 "}\n"
@@ -33,12 +35,14 @@ const char* vert =
 "vec3 dir = inDir + vec3(0,-1,0) * uTimeDelta;\n"
 "vec3 pos = inPos + dir * uTimeDelta;\n"
 "float life = inLife - uTimeDelta;\n"
-"if(life < 0) { pos = vec3(0,-0.9,0); dir = vec3(rand(vec2(uTime,gl_VertexID))-0.5,1+rand(vec2(uTime,gl_VertexID+1)),0); life=2+rand(vec2(uTime,gl_VertexID+2)); }\n"
+"float size = inSize;\n"
+"if(life < 0) { pos = vec3(0,-0.9,0); dir = vec3(rand(vec2(uTime,gl_VertexID))-0.5,1+rand(vec2(uTime,gl_VertexID+1)),0); life=2+rand(vec2(uTime,gl_VertexID+2)); size=rand(vec2(uTime,gl_VertexID+3))*10; }\n"
 "gl_Position = vec4(pos, 1.0);\n"
-"gl_PointSize = 10.0;\n"
+"gl_PointSize = size;\n"
 "outPos = pos;\n"
 "outDir = dir;\n"
 "outLife = life;\n"
+"outSize = size;\n"
 "}\n";
 
 //const char* geom =
@@ -60,7 +64,10 @@ const char* frag =
 "layout(location=2) in float inLife;\n"
 "layout(location=0) out vec4 outColor;\n"
 "void main() {\n"
-"outColor = vec4(1-inLife,inLife,1,1);\n"
+"vec2 coord = gl_PointCoord - vec2(0.5);\n"
+"float len = length(coord);\n"
+"if(len > 0.5) discard;\n"
+"outColor = vec4(inLife,gl_PointCoord.x,gl_PointCoord.y,inLife*0.5);\n"
 "}\n";
 
 GLuint vertexArrays[2] = { 0 };
@@ -77,9 +84,10 @@ struct Particle {
 	glm::vec3 pos = { 0, 0, 0 };
 	glm::vec3 dir = { 0, 0, 0 };
 	float life = 0;
+	float size = 0;
 };
 
-std::vector<Particle> particles;
+const size_t numParticles = 100000;
 
 void resize(GLFWwindow* window) {
 	int w, h;
@@ -89,7 +97,8 @@ void resize(GLFWwindow* window) {
 };
 
 void init_buffers() {
-	particles.resize(100);
+	std::vector<Particle> particles;
+	particles.resize(numParticles);
 
 	glCreateVertexArrays(2, vertexArrays);
 	glCreateBuffers(2, vertexBuffers);
@@ -106,6 +115,8 @@ void init_buffers() {
 		glVertexAttribPointer(1, 3, GL_FLOAT, GL_TRUE, sizeof(Particle), (GLvoid*)offsetof(Particle, dir));
 		glEnableVertexAttribArray(2);
 		glVertexAttribPointer(2, 1, GL_FLOAT, GL_TRUE, sizeof(Particle), (GLvoid*)offsetof(Particle, life));
+		glEnableVertexAttribArray(3);
+		glVertexAttribPointer(3, 1, GL_FLOAT, GL_TRUE, sizeof(Particle), (GLvoid*)offsetof(Particle, size));
 	}
 	glBindVertexArray(0);
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -147,8 +158,8 @@ GLuint load_program() {
 	//load_shader(geom, GL_GEOMETRY_SHADER);
 	load_shader(frag, GL_FRAGMENT_SHADER);
 
-	const char* feedbackValues[] = { "outPos", "outDir", "outLife" };
-	glTransformFeedbackVaryings(program, 3, feedbackValues, GL_INTERLEAVED_ATTRIBS);
+	const char* feedbackValues[] = { "outPos", "outDir", "outLife", "outSize" };
+	glTransformFeedbackVaryings(program, 4, feedbackValues, GL_INTERLEAVED_ATTRIBS);
 
 	glLinkProgram(program);
 
@@ -191,6 +202,8 @@ GLFWwindow* setup() {
 	}
 
 	glEnable(GL_VERTEX_PROGRAM_POINT_SIZE);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
 	glfwSetWindowSizeCallback(window, [](GLFWwindow* window, int width, int height) {
 		resize(window);
@@ -206,11 +219,22 @@ GLFWwindow* setup() {
 	return window;
 }
 
+float lastFpsUpdate = 0;
+size_t fpsCounter = 0;
+char windowTitle[1000];
+
 void render(GLFWwindow* window) {
 	auto otherBuffer = (activeBuffer + 1) & 0x1;
 	auto now = glfwGetTime();
 	auto delta = now - lastUpdate;
 	lastUpdate = now;
+	if(lastFpsUpdate + 1.0f < now) {
+		sprintf_s(windowTitle, 1000, "opengl-transform-feedback - FPS: %d, Points: %d", fpsCounter, numParticles);
+		glfwSetWindowTitle(window, windowTitle);
+		fpsCounter = 0;
+		lastFpsUpdate = now;
+	}
+	fpsCounter++;
 	glUniform1f(uTime, now);
 	glUniform1f(uTimeDelta, delta);
 	glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
@@ -221,7 +245,7 @@ void render(GLFWwindow* window) {
 
 	glBeginTransformFeedback(GL_POINTS);
 	if(firstRender) {
-		glDrawElements(GL_POINTS, particles.size(), GL_UNSIGNED_INT, 0);
+		glDrawElements(GL_POINTS, numParticles, GL_UNSIGNED_INT, 0);
 		firstRender = false;
 	} else {
 		glDrawTransformFeedback(GL_POINTS, transformFeedback[activeBuffer]);
