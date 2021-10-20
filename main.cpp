@@ -7,6 +7,7 @@
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
+#include <numeric>
 
 #if 0
 extern "C" {
@@ -19,15 +20,25 @@ const char* vert =
 "#version 450 core\n"
 "uniform float uTime;\n"
 "uniform float uTimeDelta;\n"
-"in vec3 inPos;\n"
-"out vec3 outPos;\n"
+"layout(location=0) in vec3 inPos;\n"
+"layout(location=1) in vec3 inDir;\n"
+"layout(location=2) in float inLife;\n"
+"layout(location=0) out vec3 outPos;\n"
+"layout(location=1) out vec3 outDir;\n"
+"layout(location=2) out float outLife;\n"
+"float rand(vec2 co){\n"
+"return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453);\n"
+"}\n"
 "void main() {\n"
-"vec3 dir = vec3(1.0,0,0);\n"
+"vec3 dir = inDir + vec3(0,-1,0) * uTimeDelta;\n"
 "vec3 pos = inPos + dir * uTimeDelta;\n"
-"if(pos.x > 1.0) pos.x=-1.0f;\n"
-"gl_Position = vec4(pos.x,sin(uTime),0,1.0);\n"
-"gl_PointSize = 5.0;\n"
+"float life = inLife - uTimeDelta;\n"
+"if(life < 0) { pos = vec3(0,-0.9,0); dir = vec3(rand(vec2(uTime,gl_VertexID))-0.5,1+rand(vec2(uTime,gl_VertexID+1)),0); life=2+rand(vec2(uTime,gl_VertexID+2)); }\n"
+"gl_Position = vec4(pos, 1.0);\n"
+"gl_PointSize = 10.0;\n"
 "outPos = pos;\n"
+"outDir = dir;\n"
+"outLife = life;\n"
 "}\n";
 
 //const char* geom =
@@ -46,11 +57,11 @@ const char* vert =
 
 const char* frag =
 "#version 450 core\n"
+"layout(location=2) in float inLife;\n"
 "layout(location=0) out vec4 outColor;\n"
 "void main() {\n"
-"outColor = vec4(1,0,0,0.5);\n"
+"outColor = vec4(1-inLife,inLife,1,1);\n"
 "}\n";
-
 
 GLuint vertexArrays[2] = { 0 };
 GLuint vertexBuffers[2] = { 0 };
@@ -61,13 +72,14 @@ GLuint uTime = 0;
 GLuint uTimeDelta = 0;
 float lastUpdate = 0;
 bool firstRender = true;
-std::vector<glm::vec3> points = {
-	{ 0, 0, 0 },
-	{ 0.1, 0, 0 },
-	{ 0.2, 0, 0 },
-	{ 0.3, 0, 0 },
-	{ 0.4, 0, 0 },
+
+struct Particle {
+	glm::vec3 pos = { 0, 0, 0 };
+	glm::vec3 dir = { 0, 0, 0 };
+	float life = 0;
 };
+
+std::vector<Particle> particles;
 
 void resize(GLFWwindow* window) {
 	int w, h;
@@ -77,26 +89,30 @@ void resize(GLFWwindow* window) {
 };
 
 void init_buffers() {
+	particles.resize(100);
+
 	glCreateVertexArrays(2, vertexArrays);
 	glCreateBuffers(2, vertexBuffers);
 	glCreateTransformFeedbacks(2, transformFeedback);
 	for(int i = 0; i < 2; ++i) {
 		glBindVertexArray(vertexArrays[i]);
 		glBindBuffer(GL_ARRAY_BUFFER, vertexBuffers[i]);
-		glBufferData(GL_ARRAY_BUFFER, points.size() * sizeof(glm::vec3), &points[0], GL_STATIC_DRAW);
+		glBufferData(GL_ARRAY_BUFFER, particles.size() * sizeof(Particle), &particles[0], GL_STATIC_DRAW);
 		glBindTransformFeedback(GL_TRANSFORM_FEEDBACK, transformFeedback[i]);
 		glBindBufferBase(GL_TRANSFORM_FEEDBACK_BUFFER, 0, vertexBuffers[i]);
 		glEnableVertexAttribArray(0);
-		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(glm::vec3), 0);
+		glVertexAttribPointer(0, 3, GL_FLOAT, GL_TRUE, sizeof(Particle), (GLvoid*)offsetof(Particle, pos));
+		glEnableVertexAttribArray(1);
+		glVertexAttribPointer(1, 3, GL_FLOAT, GL_TRUE, sizeof(Particle), (GLvoid*)offsetof(Particle, dir));
+		glEnableVertexAttribArray(2);
+		glVertexAttribPointer(2, 1, GL_FLOAT, GL_TRUE, sizeof(Particle), (GLvoid*)offsetof(Particle, life));
 	}
 	glBindVertexArray(0);
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	glBindTransformFeedback(GL_TRANSFORM_FEEDBACK, 0);
 
-	std::vector<uint32_t> indices;
-	for(int i = 0; i < points.size(); ++i) {
-		indices.push_back(i);
-	}
+	std::vector<uint32_t> indices(particles.size());
+	std::iota(indices.begin(), indices.end(), 1);
 	glCreateBuffers(1, &indexBuffer);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer);
 	glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(uint32_t), &indices[0], GL_STATIC_DRAW);
@@ -131,8 +147,8 @@ GLuint load_program() {
 	//load_shader(geom, GL_GEOMETRY_SHADER);
 	load_shader(frag, GL_FRAGMENT_SHADER);
 
-	const char* feedbackValues[] = { "outPos" };
-	glTransformFeedbackVaryings(program, 1, feedbackValues, GL_INTERLEAVED_ATTRIBS);
+	const char* feedbackValues[] = { "outPos", "outDir", "outLife" };
+	glTransformFeedbackVaryings(program, 3, feedbackValues, GL_INTERLEAVED_ATTRIBS);
 
 	glLinkProgram(program);
 
@@ -178,7 +194,7 @@ GLFWwindow* setup() {
 
 	glfwSetWindowSizeCallback(window, [](GLFWwindow* window, int width, int height) {
 		resize(window);
-		});
+	});
 
 	resize(window);
 
@@ -205,7 +221,7 @@ void render(GLFWwindow* window) {
 
 	glBeginTransformFeedback(GL_POINTS);
 	if(firstRender) {
-		glDrawElements(GL_POINTS, points.size(), GL_UNSIGNED_INT, 0);
+		glDrawElements(GL_POINTS, particles.size(), GL_UNSIGNED_INT, 0);
 		firstRender = false;
 	} else {
 		glDrawTransformFeedback(GL_POINTS, transformFeedback[activeBuffer]);
