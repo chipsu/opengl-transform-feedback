@@ -29,45 +29,31 @@ const char* vert =
 "layout(location=2) out float outLife;\n"
 "layout(location=3) out float outSize;\n"
 "float rand(vec2 co){\n"
-"return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453);\n"
+"	return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453);\n"
 "}\n"
 "void main() {\n"
-"vec3 dir = inDir + vec3(0,-1,0) * uTimeDelta;\n"
-"vec3 pos = inPos + dir * uTimeDelta;\n"
-"float life = inLife - uTimeDelta;\n"
-"float size = inSize;\n"
-"if(life < 0) { pos = vec3(0,-0.9,0); dir = vec3(rand(vec2(uTime,gl_VertexID))-0.5,1+rand(vec2(uTime,gl_VertexID+1)),0); life=2+rand(vec2(uTime,gl_VertexID+2)); size=rand(vec2(uTime,gl_VertexID+3))*10; }\n"
-"gl_Position = vec4(pos, 1.0);\n"
-"gl_PointSize = size;\n"
-"outPos = pos;\n"
-"outDir = dir;\n"
-"outLife = life;\n"
-"outSize = size;\n"
+"	vec3 dir = inDir + vec3(0,-1,0) * uTimeDelta;\n"
+"	vec3 pos = inPos + dir * uTimeDelta;\n"
+"	float life = inLife - uTimeDelta;\n"
+"	float size = inSize;\n"
+"	if(life < 0) { pos = vec3(0,-0.9,0); dir = vec3(rand(vec2(uTime,gl_VertexID))-0.5,1+rand(vec2(uTime,gl_VertexID+1)),0); life=2+rand(vec2(uTime,gl_VertexID+2)); size=rand(vec2(uTime,gl_VertexID+3))*10; }\n"
+"	gl_Position = vec4(pos, 1.0);\n"
+"	gl_PointSize = size;\n"
+"	outPos = pos;\n"
+"	outDir = dir;\n"
+"	outLife = life;\n"
+"	outSize = size;\n"
 "}\n";
-
-//const char* geom =
-//"#version 450 core\n"
-//"layout(points) in;\n"
-//"layout(points) out;\n"
-//"layout(max_vertices = 1) out;\n"
-//"in vec3 inPos[];\n"
-//"out vec3 outPos;\n"
-//"void main() {\n"
-//"gl_PointSize = 5.0;\n"
-//"gl_Position = gl_in[0].gl_Position;\n"
-//"outPos = inPos[0];\n"
-//"EmitVertex();\n"
-//"}\n";
 
 const char* frag =
 "#version 450 core\n"
 "layout(location=2) in float inLife;\n"
 "layout(location=0) out vec4 outColor;\n"
 "void main() {\n"
-"vec2 coord = gl_PointCoord - vec2(0.5);\n"
-"float len = length(coord);\n"
-"if(len > 0.5) discard;\n"
-"outColor = vec4(inLife,gl_PointCoord.x,gl_PointCoord.y,inLife*0.5);\n"
+"	vec2 coord = gl_PointCoord - vec2(0.5);\n"
+"	float len = length(coord);\n"
+"	if(len > 0.5) discard;\n"
+"	outColor = vec4(inLife,gl_PointCoord.x,gl_PointCoord.y,inLife*0.5);\n"
 "}\n";
 
 GLuint vertexArrays[2] = { 0 };
@@ -79,6 +65,10 @@ GLuint uTime = 0;
 GLuint uTimeDelta = 0;
 float lastUpdate = 0;
 bool firstRender = true;
+float lastFpsUpdate = 0;
+size_t fpsCounter = 0;
+char windowTitle[1000];
+const size_t numParticles = 100000;
 
 struct Particle {
 	glm::vec3 pos = { 0, 0, 0 };
@@ -87,16 +77,14 @@ struct Particle {
 	float size = 0;
 };
 
-const size_t numParticles = 100000;
-
-void resize(GLFWwindow* window) {
+void ResizeWindow(GLFWwindow* window) {
 	int w, h;
 	glfwGetFramebufferSize(window, &w, &h);
 	glViewport(0, 0, w, h);
 	glfwSwapInterval(0);
 };
 
-void init_buffers() {
+void InitBuffers() {
 	std::vector<Particle> particles;
 	particles.resize(numParticles);
 
@@ -130,10 +118,10 @@ void init_buffers() {
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 }
 
-GLuint load_program() {
+GLuint LoadShaderProgram() {
 	auto program = glCreateProgram();
 
-	auto load_shader = [&program](auto src, auto type) {
+	auto loadShader = [&program](auto src, auto type) {
 		auto shader = glCreateShader(type);
 		glShaderSource(shader, 1, &src, 0);
 		glCompileShader(shader);
@@ -154,9 +142,9 @@ GLuint load_program() {
 		glAttachShader(program, shader);
 	};
 
-	load_shader(vert, GL_VERTEX_SHADER);
-	//load_shader(geom, GL_GEOMETRY_SHADER);
-	load_shader(frag, GL_FRAGMENT_SHADER);
+	loadShader(vert, GL_VERTEX_SHADER);
+	//loadShader(geom, GL_GEOMETRY_SHADER);
+	loadShader(frag, GL_FRAGMENT_SHADER);
 
 	const char* feedbackValues[] = { "outPos", "outDir", "outLife", "outSize" };
 	glTransformFeedbackVaryings(program, 4, feedbackValues, GL_INTERLEAVED_ATTRIBS);
@@ -180,7 +168,7 @@ GLuint load_program() {
 	return program;
 }
 
-GLFWwindow* setup() {
+GLFWwindow* InitWindow() {
 	if(!glfwInit()) {
 		throw std::runtime_error("glfwInit failed");
 	}
@@ -206,12 +194,12 @@ GLFWwindow* setup() {
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
 	glfwSetWindowSizeCallback(window, [](GLFWwindow* window, int width, int height) {
-		resize(window);
+		ResizeWindow(window);
 	});
 
-	resize(window);
+	ResizeWindow(window);
 
-	auto program = load_program();
+	auto program = LoadShaderProgram();
 	glUseProgram(program);
 
 	glClearColor(0, 0, .5, 0);
@@ -219,11 +207,7 @@ GLFWwindow* setup() {
 	return window;
 }
 
-float lastFpsUpdate = 0;
-size_t fpsCounter = 0;
-char windowTitle[1000];
-
-void render(GLFWwindow* window) {
+void Render(GLFWwindow* window) {
 	auto otherBuffer = (activeBuffer + 1) & 0x1;
 	auto now = glfwGetTime();
 	auto delta = now - lastUpdate;
@@ -264,12 +248,12 @@ void render(GLFWwindow* window) {
 }
 
 void main() {
-	auto window = setup();
-	init_buffers();
+	auto window = InitWindow();
+	InitBuffers();
 	lastUpdate = glfwGetTime();
 	while(1) {
 		glfwPollEvents();
 		if(glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) break;
-		render(window);
+		Render(window);
 	}
 }
